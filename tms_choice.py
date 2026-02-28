@@ -1,3 +1,4 @@
+# make sure that it's at bull run still yet to fix
 import requests
 import pandas as pd
 from datetime import datetime, time
