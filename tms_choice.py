@@ -10,7 +10,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common import keys
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.chrome import options as option
+from selenium.webdriver.chrome.options import Options
 
 
 # Load environment variables from the .env file
@@ -35,6 +35,35 @@ def connect_google_sheet():
     workbook = client.open_by_key(sheet_id)
     return workbook
 
+def get_recent_listing(limit=10):
+    """
+    Analyze the most recent securities trade
+    """
+    option = webdriver.ChromeOptions()
+    option.add_argument("--windows-size=1100,660")
+    option.add_argument("--disable-notification")
+    option.add_argument("--disable-blink-feature=AutomationControlled")
+    option.add_argument("--ignore-certificate-errors")
+    option.add_argument("--ignore-ssl-errors")
+    option.add_argument("--allow-insecure-localhost")
+
+    driver = webdriver.Chrome(options=option)
+    driver.get("https://nepalstock.com/company")
+    driver.implicitly_wait(5)
+    driver.find_element(By.XPATH, "//div[@class='table__perpage']/select[1]").click()
+    driver.implicitly_wait(5)
+    driver.find_element(By.XPATH, "//div[@class='table__perpage']/select/option[6]").click()
+    driver.implicitly_wait(5)
+    table_data = driver.execute_script("""
+        let rows = [...document.querySelectorAll("table tbody tr")];
+        return rows
+            .slice(-10)   // take last 10 rows
+            .map(r => r.querySelectorAll("td")[2]?.innerText.trim());
+    """)
+    driver.quit()
+    return table_data
+
+    
 def get_trade_dates(symbol, limit_days=10):
     """
     Returns sorted list of oldest trade dates (ascending order)
@@ -69,6 +98,9 @@ def get_trade_dates(symbol, limit_days=10):
 
     return recent_records
 
+def next_price(num: float):
+    return int(num * 10) / 10.0
+
 
 def get_expected_trade_price(trade_date, price_records):
     """
@@ -86,14 +118,13 @@ def get_expected_trade_price(trade_date, price_records):
             prev_close = float(price_records[i - 1]['close'])
             
             expected_price = prev_close * 1.02  # +2%
-            
-            return int(expected_price * 10) / 10.0
+            return next_price(expected_price)
 
     return None
 
 def fetch_first_trades(symbol, trade_date):
     params = {
-        "Size": 10,
+        "Size": 20,
         "symbol": symbol,
         "orderBy": "TradeTime",
         "order": "asc",
@@ -122,3 +153,26 @@ def classify_session(trade_time_str):
     else:
         return "NORMAL"
 
+stocks = get_recent_listing(limit=10)
+for stock in stocks:
+    price_record = get_trade_dates(symbol=stock, limit_days=10)
+    for each in price_record:
+        thatDayTrades = fetch_first_trades(symbol=stock, trade_date=each['date'])
+        exp_open_price = get_expected_trade_price(trade_date=each['date'], price_records=price_record)
+        gotPreOrder = False
+        gotNormalOrder = False
+        for eachTrade in thatDayTrades:
+            tradeTime = eachTrade['tradeTime']
+            price = eachTrade['contractRate']
+            tradeSession = classify_session(tradeTime)
+            normal_open_price = exp_open_price
+            if tradeSession == "PRE_OPEN":
+                normal_open_price = next_price(num=price)
+                if not gotPreOrder and (exp_open_price is None or exp_open_price == price):
+                    gotPreOrder = True
+                    normal_open_price = next_price(num=price)
+                    print(f"got PreOrder of {stock} on {each['date']} by Broker no. {eachTrade['buyerMemberId']}")
+            elif tradeSession == "NORMAL" and not gotNormalOrder and (normal_open_price is None or normal_open_price == price):
+                gotNormalOrder = True
+                print(f"got Normal Order of {stock} on {each['date']} by Broker no. {eachTrade['buyerMemberId']}\n\n")
+                break
