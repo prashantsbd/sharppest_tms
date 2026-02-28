@@ -1,0 +1,6 @@
+requests
+pandas
+gspread
+python-dotenv
+oauth2client
+selenium

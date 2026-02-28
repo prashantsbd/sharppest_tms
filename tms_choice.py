@@ -1,10 +1,17 @@
 import requests
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, time
 import gspread
 from google.oauth2.service_account import Credentials
 import os
 from dotenv import load_dotenv
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common import keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.chrome import options as option
+
 
 # Load environment variables from the .env file
 load_dotenv() 
@@ -27,7 +34,6 @@ def connect_google_sheet():
     client = gspread.authorize(creds)
     workbook = client.open_by_key(sheet_id)
     return workbook
-
 
 def get_trade_dates(symbol, limit_days=10):
     """
@@ -108,11 +114,11 @@ def classify_session(trade_time_str):
     """
     trade_time_str example: '10:59:58'
     """
-    trade_time = datetime.strptime(trade_time_str, "%H:%M:%S").time()
+    dt_object = datetime.fromisoformat(trade_time_str.replace('Z', '+00:00'))
+    trade_time = dt_object.time()
 
-    if trade_time < datetime.strptime("11:00:00", "%H:%M:%S").time():
+    if trade_time < time(11, 0, 0):
         return "PRE_OPEN"
     else:
         return "NORMAL"
-
 
