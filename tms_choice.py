@@ -97,10 +97,20 @@ def get_trade_dates(symbol, limit_days=10):
     # Keep only latest `limit_days`
     recent_records = all_records[:limit_days]
 
-    return recent_records
+    # Extra filtering:
+    filtered_records = []
+    for i in range(0, len(recent_records)):
+        close = float(recent_records[i]['close'])
+        high = float(recent_records[i]['high'])
+
+        if close != high:
+            break
+
+        filtered_records.append(recent_records[i])
+    return filtered_records
 
 def next_price(num: float):
-    return int(num * 10) / 10.0
+    return int((num * 1.02) * 10) / 10.0
 
 
 def get_expected_trade_price(trade_date, price_records):
@@ -117,9 +127,7 @@ def get_expected_trade_price(trade_date, price_records):
                 return None  # First trading day
             
             prev_close = float(price_records[i - 1]['close'])
-            
-            expected_price = prev_close * 1.02  # +2%
-            return next_price(expected_price)
+            return next_price(prev_close)
 
     return None
 
@@ -155,25 +163,57 @@ def classify_session(trade_time_str):
         return "NORMAL"
 
 stocks = get_recent_listing(limit=10)
+workbook = connect_google_sheet()
+worksheet = workbook.worksheet('Raw_First_trades')
+all_rows = []
 for stock in stocks:
     price_record = get_trade_dates(symbol=stock, limit_days=10)
     for each in price_record:
-        thatDayTrades = fetch_first_trades(symbol=stock, trade_date=each['date'])
-        exp_open_price = get_expected_trade_price(trade_date=each['date'], price_records=price_record)
+        trade_date = each['date']
+        thatDayTrades = fetch_first_trades(symbol=stock, trade_date=trade_date)
+        exp_open_price = get_expected_trade_price(trade_date=trade_date, price_records=price_record)
+        normal_open_price = exp_open_price
         gotPreOrder = False
         gotNormalOrder = False
         for eachTrade in thatDayTrades:
             tradeTime = eachTrade['tradeTime']
             price = eachTrade['contractRate']
             tradeSession = classify_session(tradeTime)
-            normal_open_price = exp_open_price
             if tradeSession == "PRE_OPEN":
                 normal_open_price = next_price(num=price)
-                if not gotPreOrder and (exp_open_price is None or exp_open_price == price):
+                if not gotPreOrder and exp_open_price == price:
                     gotPreOrder = True
-                    normal_open_price = next_price(num=price)
-                    print(f"got PreOrder of {stock} on {each['date']} by Broker no. {eachTrade['buyerMemberId']}")
-            elif tradeSession == "NORMAL" and not gotNormalOrder and (normal_open_price is None or normal_open_price == price):
+                    all_rows.append([
+                        trade_date,
+                        stock,
+                        "PRE_OPEN",
+                        tradeTime,
+                        price,
+                        eachTrade['buyerMemberId'],
+                        eachTrade['sellerMemberId'],
+                    ])
+            elif tradeSession == "NORMAL" and not gotNormalOrder and normal_open_price == price:
                 gotNormalOrder = True
-                print(f"got Normal Order of {stock} on {each['date']} by Broker no. {eachTrade['buyerMemberId']}\n\n")
+                all_rows.append([
+                        trade_date,
+                        stock,
+                        "NORMAL",
+                        tradeTime,
+                        price,
+                        eachTrade['buyerMemberId'],
+                        eachTrade['sellerMemberId'],
+                    ])
                 break
+
+
+if all_rows:
+
+    # Optional: clear previous data except header
+    worksheet.batch_clear(["A2:I1000"])
+
+    worksheet.update(
+        range_name=f"A2:G{len(all_rows)+1}",
+        values=all_rows
+    )
+
+print("Bulk update completed.")
